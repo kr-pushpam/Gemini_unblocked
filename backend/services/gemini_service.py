@@ -8,15 +8,16 @@ This is the core LLM layer. All Gemini interactions go through here:
 - Streaming (yields chunks as they arrive)
 - Google Search grounding (factual answers with citations)
 
-Key concept: We use vertexai.init() ONCE, then create model instances as needed.
-The SDK handles token refresh automatically via ADC/WIF credentials.
+IMPORTANT: Vertex AI SDK is synchronous. We use sync generators for streaming
+and let FastAPI's StreamingResponse handle them in a thread.
 """
 
-from collections.abc import AsyncGenerator
+from collections.abc import Generator
 from typing import Any
 
 import vertexai
 from vertexai.generative_models import (
+    Content,
     GenerativeModel,
     Part,
     Tool,
@@ -47,17 +48,35 @@ def get_model(model_name: str | None = None, **kwargs) -> GenerativeModel:
     return GenerativeModel(model_name or settings.MODEL_NAME, **kwargs)
 
 
+def _build_history(messages: list[dict]) -> list[Content]:
+    """
+    Convert our message format to Vertex AI Content objects.
+
+    Our format: [{"role": "user", "content": "hello"}, {"role": "model", "content": "hi"}]
+    Vertex AI expects: [Content(role="user", parts=[Part.from_text("hello")]), ...]
+    """
+    history = []
+    for msg in messages:
+        history.append(
+            Content(
+                role=msg["role"],
+                parts=[Part.from_text(msg["content"])],
+            )
+        )
+    return history
+
+
 # ─── Text Generation ──────────────────────────────────────────────────────────
 
 
-async def generate_text(prompt: str) -> str:
+def generate_text(prompt: str) -> str:
     """Simple single-turn text generation."""
     model = get_model()
     response = model.generate_content(prompt)
     return response.text
 
 
-async def generate_with_history(messages: list[dict], new_message: str) -> str:
+def generate_with_history(messages: list[dict], new_message: str) -> str:
     """
     Multi-turn generation with conversation history.
 
@@ -65,13 +84,7 @@ async def generate_with_history(messages: list[dict], new_message: str) -> str:
     new_message: the latest user message
     """
     model = get_model()
-
-    # Convert our format to Vertex AI's expected history format
-    history = [
-        {"role": msg["role"], "parts": [{"text": msg["content"]}]}
-        for msg in messages
-    ]
-
+    history = _build_history(messages)
     chat = model.start_chat(history=history)
     response = chat.send_message(new_message)
     return response.text
@@ -80,9 +93,9 @@ async def generate_with_history(messages: list[dict], new_message: str) -> str:
 # ─── Streaming ────────────────────────────────────────────────────────────────
 
 
-async def stream_text(prompt: str) -> AsyncGenerator[str, None]:
+def stream_text(prompt: str) -> Generator[str, None, None]:
     """
-    Stream text response chunk-by-chunk.
+    Stream text response chunk-by-chunk (synchronous generator).
 
     Why streaming? The frontend can display tokens as they arrive,
     giving the user immediate feedback instead of waiting 5-10s.
@@ -94,15 +107,12 @@ async def stream_text(prompt: str) -> AsyncGenerator[str, None]:
             yield chunk.text
 
 
-async def stream_with_history(
+def stream_with_history(
     messages: list[dict], new_message: str
-) -> AsyncGenerator[str, None]:
+) -> Generator[str, None, None]:
     """Stream response within an ongoing conversation."""
     model = get_model()
-    history = [
-        {"role": msg["role"], "parts": [{"text": msg["content"]}]}
-        for msg in messages
-    ]
+    history = _build_history(messages)
     chat = model.start_chat(history=history)
     response = chat.send_message(new_message, stream=True)
     for chunk in response:
@@ -113,7 +123,7 @@ async def stream_with_history(
 # ─── Multimodal (Image / Document) ───────────────────────────────────────────
 
 
-async def analyze_image(image_bytes: bytes, mime_type: str, prompt: str) -> str:
+def analyze_image(image_bytes: bytes, mime_type: str, prompt: str) -> str:
     """
     Analyze an image with a text prompt.
 
@@ -126,7 +136,7 @@ async def analyze_image(image_bytes: bytes, mime_type: str, prompt: str) -> str:
     return response.text
 
 
-async def analyze_document(doc_bytes: bytes, mime_type: str, prompt: str) -> str:
+def analyze_document(doc_bytes: bytes, mime_type: str, prompt: str) -> str:
     """
     Analyze a PDF or document file with a text prompt.
 
@@ -139,9 +149,9 @@ async def analyze_document(doc_bytes: bytes, mime_type: str, prompt: str) -> str
     return response.text
 
 
-async def stream_multimodal(
+def stream_multimodal(
     file_bytes: bytes, mime_type: str, prompt: str
-) -> AsyncGenerator[str, None]:
+) -> Generator[str, None, None]:
     """Stream analysis of any file (image or document)."""
     model = get_model()
     file_part = Part.from_data(file_bytes, mime_type=mime_type)
@@ -154,7 +164,7 @@ async def stream_multimodal(
 # ─── Google Search Grounding ──────────────────────────────────────────────────
 
 
-async def generate_grounded(prompt: str) -> dict[str, Any]:
+def generate_grounded(prompt: str) -> dict[str, Any]:
     """
     Generate a response grounded with Google Search.
 
@@ -167,7 +177,6 @@ async def generate_grounded(prompt: str) -> dict[str, Any]:
     """
     _ensure_init()
 
-    # Attach Google Search as a tool the model can use
     google_search_tool = Tool.from_google_search_retrieval(
         grounding.GoogleSearchRetrieval()
     )
@@ -202,7 +211,7 @@ async def generate_grounded(prompt: str) -> dict[str, Any]:
     }
 
 
-async def stream_grounded(prompt: str) -> AsyncGenerator[str, None]:
+def stream_grounded(prompt: str) -> Generator[str, None, None]:
     """Stream a grounded response (citations only available after full response)."""
     _ensure_init()
 

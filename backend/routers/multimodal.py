@@ -52,9 +52,9 @@ async def analyze_file(
 
     # Gemini handles images and documents through the same API
     if mime_type.startswith("image/"):
-        response_text = await gemini_service.analyze_image(contents, mime_type, prompt)
+        response_text = gemini_service.analyze_image(contents, mime_type, prompt)
     else:
-        response_text = await gemini_service.analyze_document(contents, mime_type, prompt)
+        response_text = gemini_service.analyze_document(contents, mime_type, prompt)
 
     return {
         "response": response_text,
@@ -80,7 +80,7 @@ async def stream_analyze_file(
         )
 
     async def event_stream():
-        async for chunk in gemini_service.stream_multimodal(contents, mime_type, prompt):
+        for chunk in gemini_service.stream_multimodal(contents, mime_type, prompt):
             yield f"data: {chunk}\n\n"
         yield "event: done\ndata: complete\n\n"
 
@@ -112,7 +112,7 @@ async def generate_image(
             detail=f"aspect_ratio must be one of: {sorted(valid_ratios)}",
         )
 
-    images = await imagen_service.generate_image(
+    images = imagen_service.generate_image(
         prompt=prompt,
         number_of_images=number_of_images,
         aspect_ratio=aspect_ratio,
@@ -136,7 +136,7 @@ async def grounded_search(prompt: str = Form(...)):
 
     Returns the response text plus source citations (URLs and titles).
     """
-    result = await gemini_service.generate_grounded(prompt)
+    result = gemini_service.generate_grounded(prompt)
 
     return {
         "response": result["response"],
@@ -150,7 +150,7 @@ async def stream_grounded_search(prompt: str = Form(...)):
     """Stream a grounded response (note: citations available only after full response)."""
 
     async def event_stream():
-        async for chunk in gemini_service.stream_grounded(prompt):
+        for chunk in gemini_service.stream_grounded(prompt):
             yield f"data: {chunk}\n\n"
         yield "event: done\ndata: complete\n\n"
 

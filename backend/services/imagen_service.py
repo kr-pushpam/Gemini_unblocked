@@ -29,7 +29,7 @@ def _ensure_init():
         _initialized = True
 
 
-async def generate_image(
+def generate_image(
     prompt: str,
     number_of_images: int = 1,
     aspect_ratio: str = "1:1",

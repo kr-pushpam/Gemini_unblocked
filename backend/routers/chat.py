@@ -43,11 +43,11 @@ async def send_message(request: ChatRequest):
 
     # Generate — with history if we have prior messages
     if messages:
-        response_text = await gemini_service.generate_with_history(
+        response_text = gemini_service.generate_with_history(
             messages, request.message
         )
     else:
-        response_text = await gemini_service.generate_text(request.message)
+        response_text = gemini_service.generate_text(request.message)
 
     # Persist both sides of the conversation
     firestore_service.add_message(session_id, "user", request.message)
@@ -76,7 +76,7 @@ async def stream_message(request: ChatRequest):
     # Save user message immediately (response saved after streaming completes)
     firestore_service.add_message(session_id, "user", request.message)
 
-    async def event_stream():
+    def event_stream():
         full_response = ""
 
         # Choose streaming method based on history
@@ -85,7 +85,7 @@ async def stream_message(request: ChatRequest):
         else:
             generator = gemini_service.stream_text(request.message)
 
-        async for chunk in generator:
+        for chunk in generator:
             full_response += chunk
             # SSE format: "data: <payload>\n\n"
             yield f"data: {chunk}\n\n"
